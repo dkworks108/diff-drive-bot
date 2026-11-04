@@ -1,8 +1,9 @@
 import os
 import subprocess
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, RegisterEventHandler
 from launch.conditions import IfCondition
+from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
@@ -13,6 +14,7 @@ def generate_launch_description():
     # Resolve package directory (supports both local source tree and colcon install)
     pkg_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     xacro_path = os.path.join(pkg_dir, 'urdf', 'robot.xacro')
+    controllers_yaml = os.path.join(pkg_dir, 'config', 'ros2_controllers.yaml')
     default_world = os.path.join(pkg_dir, 'worlds', 'test_world.sdf')
     rviz_config = os.path.join(pkg_dir, 'config', 'rviz.rviz')
 
@@ -20,6 +22,7 @@ def generate_launch_description():
         try:
             pkg_share = get_package_share_directory('diff_drive_description')
             xacro_path = os.path.join(pkg_share, 'urdf', 'robot.xacro')
+            controllers_yaml = os.path.join(pkg_share, 'config', 'ros2_controllers.yaml')
             default_world = os.path.join(pkg_share, 'worlds', 'test_world.sdf')
             rviz_config = os.path.join(pkg_share, 'config', 'rviz.rviz')
         except Exception:
@@ -47,9 +50,10 @@ def generate_launch_description():
     rviz_arg = LaunchConfiguration('rviz')
     world_arg = LaunchConfiguration('world')
 
-    # Expand xacro to URDF string
+    # Expand xacro to URDF string with controllers_yaml path
     robot_desc = subprocess.check_output([
         'xacro', xacro_path,
+        f'controllers_yaml:={controllers_yaml}',
         'gazebo_system:=ignition'
     ]).decode('utf-8')
 
@@ -79,7 +83,6 @@ def generate_launch_description():
     )
 
     # 3. Spawn robot entity in Gazebo Fortress
-    # Robot wheels touch ground at z=0.0; spawn with base_link at z=0.05
     spawn_entity = Node(
         package='ros_gz_sim',
         executable='create',
@@ -103,7 +106,31 @@ def generate_launch_description():
         arguments=['/clock@rosgraph_msgs/msg/Clock[ignition.msgs.Clock']
     )
 
-    # 5. Optional RViz2
+    # 5. Spawner for Joint State Broadcaster
+    joint_state_broadcaster_spawner = Node(
+        package='controller_manager',
+        executable='spawner',
+        arguments=['joint_state_broadcaster', '--controller-manager', '/controller_manager'],
+        output='screen'
+    )
+
+    # 6. Spawner for Diff Drive Controller
+    diff_drive_controller_spawner = Node(
+        package='controller_manager',
+        executable='spawner',
+        arguments=['diff_drive_controller', '--controller-manager', '/controller_manager'],
+        output='screen'
+    )
+
+    # Sequence: Activate diff_drive_controller after joint_state_broadcaster is initialized
+    delay_diff_drive_controller = RegisterEventHandler(
+        event_handler=OnProcessExit(
+            target_action=joint_state_broadcaster_spawner,
+            on_exit=[diff_drive_controller_spawner]
+        )
+    )
+
+    # 7. Optional RViz2
     rviz_node = Node(
         package='rviz2',
         executable='rviz2',
@@ -120,6 +147,8 @@ def generate_launch_description():
             gz_sim_launch,
             spawn_entity,
             bridge_clock,
+            joint_state_broadcaster_spawner,
+            delay_diff_drive_controller,
             rviz_node
         ]
     )

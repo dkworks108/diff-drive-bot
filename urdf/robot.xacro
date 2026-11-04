@@ -3,6 +3,7 @@
 
   <!-- ==================== Simulation Arguments ==================== -->
   <xacro:arg name="gazebo_system" default="ignition"/>
+  <xacro:arg name="controllers_yaml" default="config/ros2_controllers.yaml"/>
 
   <!-- ==================== Materials ==================== -->
   <material name="chassis_blue">
@@ -192,6 +193,42 @@
         <specular>0.2 0.2 0.2 1.0</specular>
       </material>
     </visual>
+  </gazebo>
+
+  <!-- ==================== ros2_control Hardware Interface ==================== -->
+  <ros2_control name="DiffDriveHardware" type="system">
+    <hardware>
+      <plugin>ign_ros2_control/IgnitionSystem</plugin>
+    </hardware>
+
+    <joint name="left_wheel_joint">
+      <command_interface name="velocity">
+        <param name="min">-10.0</param>
+        <param name="max">10.0</param>
+      </command_interface>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+
+    <joint name="right_wheel_joint">
+      <command_interface name="velocity">
+        <param name="min">-10.0</param>
+        <param name="max">10.0</param>
+      </command_interface>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+  </ros2_control>
+
+  <!-- ==================== Gazebo Fortress ros2_control Plugin ==================== -->
+  <gazebo>
+    <plugin filename="ign_ros2_control-system" name="ign_ros2_control::IgnitionROS2ControlPlugin">
+      <parameters>$(arg controllers_yaml)</parameters>
+      <ros>
+        <remapping>/diff_drive_controller/cmd_vel_unstamped:=/cmd_vel</remapping>
+        <remapping>/diff_drive_controller/odom:=/odom</remapping>
+      </ros>
+    </plugin>
   </gazebo>
 
 </robot>
