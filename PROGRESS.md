@@ -22,7 +22,7 @@ This document tracks development milestones, runtime verification evidence, and 
 | 5 | **Phase 3: /cmd_vel Velocity Control** | **VERIFIED** | `tests/test_phase3_motion.py` | 9-maneuver motion test suite regulated using simulation clock `/clock`. Forward, reverse, CW/CCW, in-place rotation, circular, combined, stop, watchdog timeout. |
 | 6 | **Phase 4: Odometry & TF2** | **VERIFIED** | `tests/test_phase4_odometry.py` | Validated 50.5 Hz `/odom` rate, full covariance matrices, 1.5mm position error, `odom->base_footprint` dynamic TF, `base_footprint->base_link` static TF, buffer lookup across all links. |
 | 7 | **Phase 5: LiDAR Sensor Integration** | **VERIFIED** | `tests/test_phase5_lidar.py`<br>`launch/gazebo.launch.py` | Integrated `gpu_lidar` on `laser_link` at $x=+0.10\,\text{m}, z=+0.125\,\text{m}$. Verified `/scan` topic, 10.0 Hz rate, 360° FOV, 720 samples, obstacle geometry, and TF `base_link->laser_link`. |
-| 8 | **Phase 6: SLAM Mapping** | **NOT STARTED** | - | - |
+| 8 | **Phase 6: SLAM 2D Mapping** | **VERIFIED** | `tests/test_phase6_slam.py`<br>`launch/slam.launch.py` | Integrated `slam_toolbox` (online async). Dynamic TF `map -> odom`, full chain to `laser_link`. Robot navigated $1.56\,\text{m}$ in arena, growing known cells by $+231.0\%$. Saved map via `map_saver_cli` to `maps/test_world_map`. |
 | 9 | **Phase 7: Nav2 Autonomous Navigation** | **NOT STARTED** | - | - |
 
 ---
@@ -47,61 +47,78 @@ Under simulation-time calibrated testing:
 **Mechanics of the Orientation Divergence:**
 1. **Deceleration Profiling**: `diff_drive_controller` limits angular acceleration/deceleration to $3.0\,\text{rad/s}^2$. Ramping down from $1.0\,\text{rad/s}$ to zero takes $0.33\,\text{s}$, continuing wheel rotation through $\approx 0.167\,\text{rad}$ during braking.
 2. **Caster Lateral Scrubbing**: Unlike rolling forward where wheels experience pure longitudinal rolling ($0.18\%$ position error), turning in-place forces the front caster ball at $x = +0.15\,\text{m}$ to scrub laterally across the floor. This shifts the instantaneous center of rotation (ICR) and introduces subtle dynamic tire scrubbing, an established characteristic of differential-drive mobile bases with passive casters.
-3. **Engineering Conclusion**: Kinematic wheel odometry assumes rigid rolling on an ideal 2-point line contact without lateral scrubbing. In practice, this small dead-reckoning drift is the exact reason autonomous mobile robots fuse IMUs via `robot_localization` or perform scan-matching via SLAM.
+3. **Engineering Conclusion**: Kinematic wheel odometry assumes rigid rolling on an ideal 2-point line contact without lateral scrubbing. In practice, this dead-reckoning drift is corrected through scan-matching and graph optimization in Phase 6 SLAM!
 
 ---
 
-## Phase 5 Execution & Evidence Log
+## Phase 6 Execution & Evidence Log
 
-### Test Execution (`tests/test_phase5_lidar.py`):
+### Test Execution (`tests/test_phase6_slam.py`):
 ```
-==================================================================
-  PROJECT 3 - PHASE 5: 2D LIDAR INTEGRATION VALIDATION SUITE      
-==================================================================
-Launching Gazebo Fortress with GPU LiDAR sensor...
-Collecting LaserScan samples from /scan...
+======================================================================
+  PROJECT 3 - PHASE 6: SLAM TOOLBOX 2D MAPPING VALIDATION SUITE
+======================================================================
 
-[TEST 1] /scan Topic & Active Publisher Check...
-  Topic Type: True | Has Publisher: True
+[TEST 1] Launching Gazebo Fortress + Controllers + SLAM Toolbox...
+  Waiting up to 25s for Gazebo, controllers and SLAM Toolbox to initialize...
+  Simulation & SLAM process running: True
+  Simulation time received: True (5.46s)
 
-[TEST 2] /scan Continuous Publish Rate Verification...
-  Calculated Rate: 10.0 Hz (Configured target: 10.0 Hz, Samples: 25)
+[TEST 2] Simulation Time Check (/clock)...
+  Current sim_time: 5.463 s
 
-[TEST 3] Frame ID Verification in Header...
-  Reported frame_id: 'laser_link' (Expected: 'laser_link')
+[TEST 3] Initial /map Topic & Structure...
+  Map Frame ID: 'map' (Expected: 'map')
+  Resolution: 0.050 m/pixel (Expected: 0.05m)
+  Dimensions: 196 x 196 cells (9.8m x 9.8m coverage)
+  Origin: (-4.91, -4.91)
 
-[TEST 4] Field-of-View & Angular Coverage...
-  Samples: 720 (Expected: 720)
-  Angle Min: -3.1416 rad, Max: 3.1416 rad
-  FOV Coverage: 360.0 degrees (Expected: ~360.0 deg)
+[TEST 4] Map Cell Distribution (Unknown, Free, Occupied)...
+  Total cells: 38416
+  Unknown (-1):   32103 (83.7%)
+  Free space (0):  6234 (16.3%)
+  Occupied (>0):     79 (0.2%)
+  Initial known cells: 6313 (Free + Obstacles)
 
-[TEST 5] Range Measurement Bounds (0.1m - 10.0m)...
-  Configured Bounds: min=0.10m, max=10.00m
-  Finite / Valid returns: 720 / 720 (100.0%)
+[TEST 5] TF Transform: map -> odom...
+  Transform map -> odom: translation=[0.0000, 0.0000, 0.0000]
 
-[TEST 6] Obstacle Distance & Arena Geometry Verification...
-  Forward  (Angle  0.0 deg): 4.800 m (Expected: ~4.90m North Wall)
-  Rear     (Angle 180.0 deg): 5.000 m (Expected: ~5.10m South Wall)
-  Left     (Angle +90.0 deg): 3.100 m (Expected: ~3.20m Center Partition)
-  Right    (Angle -90.0 deg): 4.900 m (Expected: ~5.00m West Wall)
-  Geometry Accuracy: Front=True, Rear=True, Left=True, Right=True
+[TEST 6] Full TF Chain: map -> odom -> base_footprint -> base_link -> laser_link...
+  Full Transform map -> laser_link: [0.1000, 0.0000, 0.1750]
 
-[TEST 7] TF Lookup: base_link -> laser_link...
-  Transform base_link -> laser_link: [0.100, 0.000, 0.125]
+[TEST 7] Dynamic Mapping Maneuver (Moving robot to expand map)...
+  Initial Odom Pose: X=0.000 m, Y=-0.000 m
+  Initial Known Cells: 6313
+  Leg 1: Driving forward 1.2m at 0.4 m/s (sim time)...
+  Leg 2: Rotating CCW 90 degrees at 0.5 rad/s (sim time)...
+  Leg 3: Driving forward 1.0m along new heading at 0.4 m/s (sim time)...
+  Waiting 6s sim time for SLAM graph optimization & map updates...
+  Final Odom Pose: X=1.201 m, Y=1.000 m (Displacement: 1.563 m)
+  Map update messages received: 9
+  Final Known Cells: 20899 (Free: 19368, Occupied: 1531)
+  Map Expansion: +14586 cells (+231.0%)
 
-[TEST 8] Full TF Lookup: odom -> laser_link...
-  Transform odom -> laser_link: [0.100, 0.000, 0.175]
+[TEST 8] Saving Map via map_saver_cli...
+  Saved YAML (/media/bumble/DATA_DISK/robotics/projects/03_diff_drive_robot/maps/test_world_map.yaml): 132 bytes
+  Saved PGM  (/media/bumble/DATA_DISK/robotics/projects/03_diff_drive_robot/maps/test_world_map.pgm):  42370 bytes
 
-==================================================================
-  PHASE 5 LIDAR VALIDATION SUMMARY
-==================================================================
-  [PASS] 1. /scan Topic & Publisher: LaserScan publisher active
-  [PASS] 2. /scan Publish Rate: rate=10.0Hz
-  [PASS] 3. Frame ID Verification: frame_id='laser_link'
-  [PASS] 4. FOV & Samples: 720 samples, 360.0 deg FOV
-  [PASS] 5. Range Bounds Check: 100.0% valid returns
-  [PASS] 6. Obstacle Geometry Detection: Fwd=4.80m, Rear=5.00m, Left=3.10m
-  [PASS] 7. TF base_link->laser_link: trans=[0.100, 0.000, 0.125]
-  [PASS] 8. Full TF odom->laser_link: trans=[0.100, 0.000, 0.175]
-==================================================================
+[TEST 9] RViz2 SLAM Visualization Snapshot...
+  RViz2 screenshot saved: /media/bumble/DATA_DISK/robotics/projects/03_diff_drive_robot/screenshots/phase6_slam_mapping.png (176294 bytes)
+
+  Terminating simulation & SLAM processes...
+  Cleaned up all background simulation processes.
+
+======================================================================
+  PHASE 6 SLAM TOOLBOX 2D MAPPING VALIDATION SUMMARY
+======================================================================
+  [PASS] 1. Stack Launch: sim_time=5.463
+  [PASS] 2. Simulation Time Clock: sim_time=5.463 s
+  [PASS] 3. /map Message Structure: res=0.05m, size=196x196, frame='map'
+  [PASS] 4. Cell Classification: unknown=32103, free=6234, occupied=79
+  [PASS] 5. TF map -> odom: trans=[0.000, 0.000, 0.000]
+  [PASS] 6. Full TF Tree (map -> laser_link): trans=[0.100, 0.000, 0.175]
+  [PASS] 7. Dynamic Mapping Expansion: dist=1.56m, cell_gain=+14586 (+231.0%)
+  [PASS] 8. Map Saving (map_saver_cli): yaml=132B, pgm=42370B
+  [PASS] 9. RViz2 Visualization Snapshot: path=screenshots/phase6_slam_mapping.png
+======================================================================
 ```

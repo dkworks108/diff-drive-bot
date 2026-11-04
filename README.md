@@ -1,6 +1,6 @@
 # 03_diff_drive_robot: Autonomous 2-Wheel Differential Drive Mobile Robot
 
-A complete simulated differential-drive mobile robot stack developed for **ROS 2 Humble** and **Gazebo Fortress (Ignition 6.18.0)**, featuring `ros2_control`, precision odometry, 360° 2D LiDAR integration, and readiness for SLAM Toolbox and Nav2 autonomous navigation.
+A complete simulated differential-drive mobile robot stack developed for **ROS 2 Humble** and **Gazebo Fortress (Ignition 6.18.0)**, featuring `ros2_control`, precision odometry, 360° 2D LiDAR integration, online asynchronous 2D SLAM (`slam_toolbox`), and readiness for Nav2 autonomous navigation.
 
 ---
 
@@ -13,7 +13,7 @@ A complete simulated differential-drive mobile robot stack developed for **ROS 2
 | **Wheel Radius ($r$)** | `left/right_wheel_link` | **$0.05\,\text{m}$** ($50\,\text{mm}$) | Cylinder length: $0.04\,\text{m}$ |
 | **Wheel Separation ($d$)** | Track Width | **$0.30\,\text{m}$** ($300\,\text{mm}$) | Symmetrical offsets: $y_L = +0.15\,\text{m}, y_R = -0.15\,\text{m}$ |
 | **Caster Ball** | Passive Omnidirectional Support | Radius $0.05\,\text{m}$ | Mounted at $x = +0.15\,\text{m}, z = 0.0\,\text{m}$, low-friction contact ($\mu = 0.001$) |
-| **LiDAR Sensor** | `laser_link` | Mounted on chassis | Offset $xyz=(+0.10, 0.0, 0.125)\,\text{m}$ relative to `base_link` |
+| **LiDAR Sensor** | `laser_link` | Mounted on chassis | Offset $xyz=(+0.10, 0.0, 0.125)\,\text{m}$ relative to `base_link` ($0.175\,\text{m}$ above ground) |
 
 ---
 
@@ -33,10 +33,11 @@ $$\omega_R = \frac{v_x + \frac{d}{2} \omega_z}{r}$$
 
 ---
 
-## 3. Link Hierarchy & TF2 Transformation Tree
+## 3. Link Hierarchy & Complete TF2 Transformation Tree
 
 ```mermaid
 flowchart TD
+    map["map (Global Fixed SLAM Frame)"]
     odom["odom (Odometry World Frame)"]
     bf["base_footprint (Ground Projection Frame, z=0)"]
     bl["base_link (Chassis Frame, z=0.05m)"]
@@ -45,6 +46,7 @@ flowchart TD
     cw["caster_wheel_link"]
     ll["laser_link (2D LiDAR Frame)"]
 
+    map -->|/tf dynamic (slam_toolbox)| odom
     odom -->|/tf dynamic (diff_drive_controller)| bf
     bf -->|/tf_static (robot_state_publisher)| bl
     bl -->|/tf dynamic (robot_state_publisher)| lw
@@ -69,98 +71,92 @@ flowchart TD
 
 ---
 
-## 5. Software Architecture
+## 5. Phase 6: SLAM Toolbox 2D Mapping Architecture
 
-```mermaid
-flowchart LR
-    subgraph Gazebo Fortress
-        GZ_PHYSICS["ODE Physics (1ms max step)"]
-        GZ_LIDAR["gpu_lidar Sensor Plugin"]
-        GZ_ROS2["ign_ros2_control Plugin"]
-    end
-
-    subgraph ROS 2 Layer
-        CM["controller_manager"]
-        JSB["joint_state_broadcaster"]
-        DDC["diff_drive_controller"]
-        RSP["robot_state_publisher"]
-        GZ_BRIDGE["ros_gz_bridge (/clock, /scan)"]
-    end
-
-    GZ_ROS2 <--> CM
-    CM --> JSB
-    CM --> DDC
-    JSB -->|/joint_states| RSP
-    DDC -->|/odom & /tf| NavStack["SLAM / Nav2 Stack"]
-    GZ_LIDAR -->|ignition.msgs.LaserScan| GZ_BRIDGE
-    GZ_BRIDGE -->|/scan| NavStack
-    GZ_BRIDGE -->|/clock| RSP
-    RSP -->|/tf & /tf_static| NavStack
-```
+- **SLAM Mode**: Online Asynchronous Mapping (`async_slam_toolbox_node`)
+- **Solver Plugin**: `solver_plugins::CeresSolver` (Ceres Nonlinear Least Squares optimization)
+- **Scan Matcher**: Real-time correlation scan-matching + scan barycenter
+- **Map Resolution**: $0.05\,\text{m}$/pixel ($5\,\text{cm}$ grid)
+- **Update Rate**: $2.0\,\text{s}$ periodic map publishing and graph optimization
+- **Dynamic Transform**: Publishes `map -> odom` transform at $50\,\text{Hz}$ (`transform_publish_period: 0.02`)
+- **Map Output**: `nav_msgs/msg/OccupancyGrid` on `/map` (trinary format: $-1$ unknown, $0$ free, $>0$ occupied)
 
 ---
 
-## 6. How to Build & Run
+## 6. Build and Launch Instructions
 
-### 1. Build Package
+### Setup Environment
 ```bash
-cd /media/bumble/DATA_DISK/robotics/projects/03_diff_drive_robot
-colcon build --symlink-install
+source /opt/ros/humble/setup.bash
+source /media/bumble/DATA_DISK/robotics/opt/ros_extra/setup.bash
 source install/setup.bash
 ```
 
-### 2. Launch in RViz2 (with joint sliders)
+### Build Workspace
 ```bash
-ros2 launch diff_drive_description display.launch.py
+colcon build --symlink-install
 ```
 
-### 3. Launch Gazebo Fortress Simulation
+### Launch Gazebo Simulation (Physics & Controllers only)
 ```bash
-# GUI Mode with Arena World & Controllers
-ros2 launch diff_drive_description gazebo.launch.py
-
-# Headless Server Mode (low CPU)
-ros2 launch diff_drive_description gazebo.launch.py headless:=true
-
-# Gazebo + RViz2 Combined
-ros2 launch diff_drive_description gazebo.launch.py rviz:=true
+# Launch Gazebo GUI + robot controllers + LiDAR bridge
+ros2 launch diff_drive_description gazebo.launch.py headless:=false rviz:=true
 ```
 
-### 4. Teleoperate / Send Velocity Commands
+### Launch Complete SLAM Mapping Stack
 ```bash
-# Drive Forward (0.5 m/s)
-ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.5, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}"
+# Launches Gazebo Fortress + ros2_control + SLAM Toolbox + RViz2 (fixed frame: map)
+ros2 launch diff_drive_description slam.launch.py headless:=false rviz:=true
+```
 
-# Rotate Counter-Clockwise (1.0 rad/s)
-ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 1.0}}"
+### Drive Robot for Mapping
+```bash
+# Teleoperate or publish motion commands
+ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.3}, angular: {z: 0.2}}" -r 10
+```
 
-# Emergency Stop
-ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}"
+### Save Completed SLAM Map
+```bash
+# Save to maps/test_world_map.yaml and maps/test_world_map.pgm
+ros2 run nav2_map_server map_saver_cli -t /map -f maps/test_world_map --ros-args -p use_sim_time:=true
 ```
 
 ---
 
-## 7. Automated Test Suites
+## 7. Verification Test Suite
 
-All tests are simulation-time calibrated and run headless without manual intervention:
+All phases are supported by automated validation suites:
 
 ```bash
-# Phase 1: Physics, Spawning, and Ground Contact Stability
+# Phase 1: Gazebo Physics & Ground Contact
 python3 tests/test_phase1_physics.py
 
-# Phase 2: ros2_control Hardware Interface & Controller Activation
+# Phase 2: ros2_control Diff Drive Controllers
 python3 tests/test_phase2_ros2_control.py
 
-# Phase 3: Comprehensive 9-Maneuver Motion Test Suite
+# Phase 3: Comprehensive 9-Maneuver Motion Suite
 python3 tests/test_phase3_motion.py
 
-# Phase 4: Precision Odometry & TF2 Verification
+# Phase 4: Odometry & TF2 Accuracy
 python3 tests/test_phase4_odometry.py
 
-# Phase 5: 2D LiDAR Integration & Scan Geometry Verification
+# Phase 5: 2D LiDAR Integration & Scan Geometry
 python3 tests/test_phase5_lidar.py
 
-# Baseline Structural Checks
-python3 test_robot.py
-python3 test_extra.py
+# Phase 6: SLAM Toolbox 2D Mapping & Map Persistence
+python3 tests/test_phase6_slam.py
 ```
+
+---
+
+## 8. Milestone Summary
+
+| Milestone | Status | Key Evidence |
+| :--- | :---: | :--- |
+| **Phase 1: Gazebo Physics** | **VERIFIED** | Spawns in `test_world.sdf`, stable ground contact at $z \approx 0.0\,\text{m}$. |
+| **Phase 2: ros2_control** | **VERIFIED** | `diff_drive_controller` & `joint_state_broadcaster` active at $50\,\text{Hz}$. |
+| **Phase 3: Motion Validation** | **VERIFIED** | 9 maneuvers verified using simulation clock (`/clock`). |
+| **Phase 4: Odometry & TF2** | **VERIFIED** | $1.5\,\text{mm}$ position error, dynamic TF `odom -> base_footprint`, static TF `base_footprint -> base_link`. |
+| **Phase 5: 2D LiDAR** | **VERIFIED** | $360^\circ$ FOV, 720 samples, 10Hz, accurate detection of arena geometry. |
+| **Phase 6: SLAM 2D Mapping** | **VERIFIED** | Ceres-backed async mapping, dynamic `map -> odom` TF, $+231.0\%$ map growth during motion, saved to `maps/test_world_map`. |
+| **Phase 7: Nav2 Navigation** | **NOT STARTED** | Ready for Phase 7 navigation stack integration. |
