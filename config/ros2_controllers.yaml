@@ -52,3 +52,4 @@ diff_drive_controller:
         has_acceleration_limits: true
         max_acceleration: 3.0
         min_acceleration: -3.0
+
