@@ -3,4 +3,6 @@ __pycache__/
 *test_report.txt
 *gazebo_test.txt
 pybullet_*.png
-test_extra.py
+build/
+install/
+log/
