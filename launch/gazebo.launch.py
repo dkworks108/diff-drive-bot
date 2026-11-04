@@ -97,13 +97,16 @@ def generate_launch_description():
         ]
     )
 
-    # 4. ROS-Gazebo parameter bridge for /clock (simulation time sync)
-    bridge_clock = Node(
+    # 4. ROS-Gazebo parameter bridge for /clock and /scan
+    bridge_params = Node(
         package='ros_gz_bridge',
         executable='parameter_bridge',
-        name='clock_bridge',
+        name='parameter_bridge',
         output='screen',
-        arguments=['/clock@rosgraph_msgs/msg/Clock[ignition.msgs.Clock']
+        arguments=[
+            '/clock@rosgraph_msgs/msg/Clock[ignition.msgs.Clock',
+            '/scan@sensor_msgs/msg/LaserScan[ignition.msgs.LaserScan'
+        ]
     )
 
     # 5. Spawner for Joint State Broadcaster
@@ -146,7 +149,7 @@ def generate_launch_description():
             node_robot_state_publisher,
             gz_sim_launch,
             spawn_entity,
-            bridge_clock,
+            bridge_params,
             joint_state_broadcaster_spawner,
             delay_diff_drive_controller,
             rviz_node
