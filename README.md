@@ -102,7 +102,45 @@ The navigation stack integrates the complete ROS 2 Navigation2 (Nav2) architectu
 
 ---
 
-## 7. Build and Launch Instructions
+## 7. Phase 8: Autonomous Frontier-Based Exploration Architecture
+
+Phase 8 elevates the robot from pre-mapped navigation to **fully autonomous frontier-based exploration**, enabling the robot to explore an unknown environment from scratch without human intervention or pre-existing maps:
+
+```mermaid
+flowchart LR
+    LIDAR["GPU LiDAR (/scan)"] --> SLAM["SLAM Toolbox (Online Async)"]
+    SLAM -->|"/map & map->odom TF"| EXP["Frontier Exploration Node"]
+    SLAM -->|"/map"| GCOST["Nav2 Global Costmap"]
+    EXP -->|"Ranked Safe Goals"| NAV2["Nav2 NavigateToPose Action"]
+    NAV2 -->|"Path Following (/cmd_vel)"| CTRL["ros2_control Diff Drive"]
+    CTRL -->|"Odometry (/odom & odom->base_footprint)"| SLAM
+    EXP -->|"Markers (/exploration/*)"| RVIZ["RViz2 Visualization"]
+```
+
+### Key Engineering Architecture:
+1. **SLAM-Nav2 Decoupled Authority (No AMCL / No static Map Server)**:
+   - In exploration mode, `slam_toolbox` acts as the **sole authority** for both the occupancy map (`/map`) and the global localization transform (`map -> odom`).
+   - `map_server` and `amcl` are completely excluded to eliminate competing TF publishers and map topic collisions.
+   - `nav2_lifecycle_manager` manages strictly the four motion-execution nodes: `controller_server`, `planner_server`, `behavior_server`, and `bt_navigator`.
+   - `global_costmap` dynamic update layer subscribes directly to `/map` with transient local durability. `allow_unknown: false` in Navfn planner enforces that paths only traverse verified free space.
+2. **Algorithmic Frontier Detection Engine (`frontier_detector.py`)**:
+   - **Frontier Cell Extraction**: Fast vectorized 8-connectivity filtering identifying free cells ($0 \le \text{occupancy} \le 25$) that touch unknown cells ($-1$).
+   - **Obstacle Clearance & Distance Transform**: Euclidean Distance Transform (EDT) computes clearance from all occupied obstacles. Frontier cells closer than safety buffer ($0.28\,\text{m}$) are pruned.
+   - **Connected-Component Clustering**: 8-connected BFS groups adjacent frontier cells into clusters, filtering out noise with cluster size $< 5$ cells.
+   - **Safe Goal Projection**: Computes cluster centroid; if inside an obstacle inflation or unknown zone, projects to the highest-clearance free cell within the cluster.
+   - **Multi-Objective Cost Ranking**:
+     $$J(\text{goal}) = w_{\text{dist}} \cdot d(\text{robot}, \text{goal}) - w_{\text{size}} \cdot (\text{size} \cdot \text{res}) - w_{\text{clear}} \cdot d_{\text{obs}}$$
+     Balances travel efficiency, information gain, and safe clearance.
+   - **Temporal Spatial Blacklisting**: Failed or unreachable goals are blacklisted within radius $0.6\,\text{m}$ for $60\,\text{s}$, preventing livelock and oscillation.
+3. **Explorer State Machine (`explorer_node.py`)**:
+   - `INIT` $\rightarrow$ `IDLE` $\rightarrow$ `PLANNING` $\rightarrow$ `NAVIGATING` $\rightarrow$ `WAITING_RETRY` $\rightarrow$ `COMPLETED`
+   - Commands motion **strictly via Nav2 `NavigateToPose` actions**—never publishes directly to `/cmd_vel`, guaranteeing continuous dynamic obstacle avoidance.
+   - Publishes rich RViz visualization markers (`MarkerArray` on `/exploration/frontiers`, `Marker` on `/exploration/current_goal`).
+   - Exposes standard ROS 2 services: `/exploration/pause`, `/exploration/resume`, `/exploration/stop`.
+
+---
+
+## 8. Build and Launch Instructions
 
 ### Setup Environment
 ```bash
@@ -134,15 +172,30 @@ ros2 launch diff_drive_description slam.launch.py headless:=false rviz:=true
 ros2 launch diff_drive_description navigation.launch.py headless:=false rviz:=true
 ```
 
-### Send Navigation Goal via CLI
+### Launch Autonomous Frontier Exploration Stack
 ```bash
-ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose \
-  "{pose: {header: {frame_id: 'map'}, pose: {position: {x: 1.8, y: 0.0, z: 0.0}, orientation: {w: 1.0}}}}"
+# Launches Gazebo Fortress + ros2_control + SLAM Toolbox + SLAM-Nav2 + Frontier Explorer + RViz2
+ros2 launch diff_drive_description exploration.launch.py headless:=false rviz:=true
+```
+
+### Exploration Runtime Control (Services)
+```bash
+# Pause autonomous exploration
+ros2 service call /exploration/pause std_srvs/srv/Trigger
+
+# Resume autonomous exploration
+ros2 service call /exploration/resume std_srvs/srv/Trigger
+
+# Stop autonomous exploration and cancel active goals
+ros2 service call /exploration/stop std_srvs/srv/Trigger
+
+# Save final exploration map
+ros2 run nav2_map_server map_saver_cli -t /map -f maps/autonomous_exploration_map --ros-args -p map_subscribe_transient_local:=true -p use_sim_time:=true
 ```
 
 ---
 
-## 8. Verification Test Suite
+## 9. Verification Test Suite
 
 All phases are supported by automated validation suites:
 
@@ -167,11 +220,17 @@ python3 tests/test_phase6_slam.py
 
 # Phase 7: Nav2 Autonomous Navigation Full Validation
 python3 tests/test_phase7_navigation.py
+
+# Phase 8: Frontier Detector Algorithmic Unit Tests (14/14 tests)
+python3 tests/test_phase8_frontier_unit.py
+
+# Phase 8: Autonomous Frontier Exploration Full Simulation Suite (16/16 tests)
+python3 tests/test_phase8_exploration.py
 ```
 
 ---
 
-## 9. Milestone Summary
+## 10. Milestone Summary
 
 | Milestone | Status | Key Evidence |
 | :--- | :---: | :--- |
@@ -182,3 +241,4 @@ python3 tests/test_phase7_navigation.py
 | **Phase 5: 2D LiDAR** | **VERIFIED** | $360^\circ$ FOV, 720 samples, 10Hz, accurate detection of arena geometry. |
 | **Phase 6: SLAM 2D Mapping** | **VERIFIED** | Ceres-backed async mapping, dynamic `map -> odom` TF, $+231.0\%$ map growth during motion, saved to `maps/test_world_map`. |
 | **Phase 7: Nav2 Navigation** | **VERIFIED** | Map Server + AMCL + Costmaps + Navfn + DWB + BT Navigator. 11/11 tests pass: dynamic TF, path planning (80 waypoints), autonomous navigation to $(1.8, 0.0)$, active braking ($v=0.035\,\text{m/s} < 0.05\,\text{m/s}$), obstacle clearance ($1.12\,\text{m}$). |
+| **Phase 8: Autonomous Exploration** | **VERIFIED** | SLAM Toolbox + SLAM-Nav2 + `frontier_exploration` package. 30/30 tests pass (14 unit + 16 integration). Autonomous displacement $1.382\,\text{m}$, dynamic map expansion $+245.3\%$ ($+15,486$ cells), obstacle clearance $0.772\,\text{m}$, failed goal blacklisting & recovery verified, final map saved to `maps/autonomous_exploration_map`, RViz screenshot captured. |

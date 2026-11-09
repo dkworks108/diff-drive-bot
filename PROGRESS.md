@@ -24,6 +24,7 @@ This document tracks development milestones, runtime verification evidence, and 
 | 7 | **Phase 5: LiDAR Sensor Integration** | **VERIFIED** | `tests/test_phase5_lidar.py`<br>`launch/gazebo.launch.py` | Integrated `gpu_lidar` on `laser_link` at $x=+0.10\,\text{m}, z=+0.125\,\text{m}$. Verified `/scan` topic, 10.0 Hz rate, 360° FOV, 720 samples, obstacle geometry, and TF `base_link->laser_link`. |
 | 8 | **Phase 6: SLAM 2D Mapping** | **VERIFIED** | `tests/test_phase6_slam.py`<br>`launch/slam.launch.py` | Integrated `slam_toolbox` (online async). Dynamic TF `map -> odom`, full chain to `laser_link`. Robot navigated $1.56\,\text{m}$ in arena, growing known cells by $+231.0\%$. Saved map via `map_saver_cli` to `maps/test_world_map`. |
 | 9 | **Phase 7: Nav2 Autonomous Navigation** | **VERIFIED** | `tests/test_phase7_navigation.py`<br>`launch/navigation.launch.py` | Full Nav2 stack (Map Server, AMCL, DWB Controller, Navfn Planner, Behavior Server, BT Navigator, Lifecycle Manager). Verified 11/11 tests: full TF chain, global/local costmaps, 80-waypoint global path, autonomous goal navigation to $(1.8, 0.0)$, active braking ($v=0.035\,\text{m/s} < 0.05\,\text{m/s}$), obstacle clearance ($1.12\,\text{m}$), and RViz screenshot. |
+| 10 | **Phase 8: Autonomous Frontier Exploration** | **VERIFIED** | `tests/test_phase8_frontier_unit.py`<br>`tests/test_phase8_exploration.py`<br>`launch/exploration.launch.py` | Complete autonomous frontier-based exploration stack (SLAM Toolbox + Nav2 SLAM mode + `frontier_exploration` package). 14/14 unit tests passed + 16/16 simulation integration tests passed. Autonomous displacement $1.382\,\text{m}$, dynamic map expansion $+245.3\%$ ($+15,486$ cells), obstacle clearance $0.772\,\text{m}$ ($\ge 0.18\,\text{m}$ threshold), failed goal blacklisting & recovery verified, final map saved to `maps/autonomous_exploration_map`, RViz screenshot captured. |
 
 ---
 
@@ -198,4 +199,123 @@ Under simulation-time calibrated testing:
   [PASS] 10. Obstacle Avoidance Planning: clearance=1.123m
   [PASS] 11. RViz2 Navigation Snapshot: path=screenshots/phase7_navigation.png
 ======================================================================
+```
+
+---
+
+## Phase 8 Execution & Evidence Log
+
+### 1. Algorithmic Unit Tests (`tests/test_phase8_frontier_unit.py`):
+```
+======================================================================
+  PROJECT 3 - PHASE 8: FRONTIER DETECTOR ALGORITHMIC UNIT TESTS
+======================================================================
+test_01_frontier_cell_detection (__main__.TestFrontierDetectorUnit) ... ok
+test_02_multiple_frontier_clusters (__main__.TestFrontierDetectorUnit) ... ok
+test_03_min_cluster_filtering (__main__.TestFrontierDetectorUnit) ... ok
+test_04_occupied_cell_rejection (__main__.TestFrontierDetectorUnit) ... ok
+test_05_non_convex_frontier_clusters (__main__.TestFrontierDetectorUnit) ... ok
+test_06_safe_goal_extraction (__main__.TestFrontierDetectorUnit) ... ok
+test_07_goal_ranking (__main__.TestFrontierDetectorUnit) ... ok
+test_08_failed_goal_blacklisting (__main__.TestFrontierDetectorUnit) ... ok
+test_09_blacklist_expiry (__main__.TestFrontierDetectorUnit) ... ok
+test_10_no_frontier_handling (__main__.TestFrontierDetectorUnit) ... ok
+test_11_unreachable_frontier_blacklisting_recovery (__main__.TestFrontierDetectorUnit) ... ok
+test_12_grid_to_world_conversion (__main__.TestFrontierDetectorUnit) ... ok
+test_13_map_origin_and_resolution (__main__.TestFrontierDetectorUnit) ... ok
+test_14_invalid_occupancy_grids (__main__.TestFrontierDetectorUnit) ... ok
+
+----------------------------------------------------------------------
+Ran 14 tests in 0.040s
+
+OK
+======================================================================
+  Tests run: 14, Failures: 0, Errors: 0
+======================================================================
+```
+
+### 2. Full Simulation Integration Test (`tests/test_phase8_exploration.py`):
+```
+======================================================================
+  PROJECT 3 - PHASE 8: AUTONOMOUS FRONTIER EXPLORATION VALIDATION
+======================================================================
+
+[LAUNCH] Launching Gazebo Fortress + SLAM Toolbox + SLAM-Nav2 + Explorer...
+  Waiting up to 35s for Gazebo, SLAM, Nav2 and Explorer initialization...
+
+[TEST 1] Gazebo Fortress Startup & Clock Synchronization...
+  Simulation running: True, Sim time: 4.701 s
+
+[TEST 2] Robot Spawning & ros2_control Activation...
+  Odometry active: True, Pose: (0.000, 0.000)
+
+[TEST 3] SLAM Toolbox Dynamic TF Authority (map -> odom)...
+  Transform map -> odom: translation=[-0.5830, -0.0566, 0.0000]
+
+[TEST 4] Live Occupancy Grid Map Publication (/map)...
+  Map Frame: 'map', Dimensions: 196x196, Res: 0.050m
+  Initial Known Cells: 6313 (Free: 6234, Occupied: 79)
+
+[TEST 5] Nav2 Architecture Verification (No AMCL / No static map_server)...
+  amcl present: False (Expected: False)
+  map_server present: False (Expected: False)
+  controller_server present: True (Expected: True)
+  planner_server present: True (Expected: True)
+  bt_navigator present: True (Expected: True)
+
+[TEST 6] NavigateToPose Action Server Availability...
+  NavigateToPose action server ready: True
+
+[TEST 7] Frontier Exploration Node Startup & Markers...
+  frontier_explorer node running: True
+  Frontier markers received: True (2 markers)
+
+[TEST 8, 9, 10, 11] Monitoring Autonomous Exploration Execution...
+  Tracking autonomous motion, map expansion, and obstacle safety for 35s sim time...
+  Target exploration displacement (1.38m) and map growth reached early at sim time 27.5s.
+  Max Robot Displacement: 1.382 m (Target: > 1.2 m)
+  Max Speed Achieved: 1.060 m/s
+  Minimum Obstacle Clearance: 0.772 m (Safety threshold: >= 0.18 m)
+  Initial Known Cells: 6313 -> Final Known Cells: 21799
+  Map Expansion: +15486 cells (+245.3%)
+
+[TEST 12] Failed Goal Blacklisting Verification...
+  Blacklist active within radius: True, Expired correctly: True
+
+[TEST 13] Unreachable Frontier Recovery Logic...
+  Empty/unreachable handling clean: True
+
+[TEST 14] Safe Completion & Termination Logic...
+
+[TEST 15] Saving Final Autonomous Exploration Map...
+  Map saved YAML: /media/bumble/DATA_DISK/robotics/projects/03_diff_drive_robot/maps/autonomous_exploration_map.yaml (144 B)
+  Map saved PGM:  /media/bumble/DATA_DISK/robotics/projects/03_diff_drive_robot/maps/autonomous_exploration_map.pgm (38431 B)
+
+[TEST 16] RViz2 Exploration Visualization Snapshot...
+  RViz2 screenshot saved: /media/bumble/DATA_DISK/robotics/projects/03_diff_drive_robot/screenshots/phase8_exploration.png (270743 bytes)
+
+  Terminating simulation & exploration processes...
+  Cleaned up all simulation processes.
+
+======================================================================
+  PHASE 8 AUTONOMOUS EXPLORATION VALIDATION SUMMARY
+======================================================================
+  [PASS] 1. Gazebo & Simulation Clock: sim_time=4.701 s
+  [PASS] 2. Robot Spawn & ros2_control: odom_pose=(0.000, 0.000)
+  [PASS] 3. SLAM Toolbox TF Authority: trans=[-0.583, -0.057, 0.000]
+  [PASS] 4. Live /map Publication: known_cells=6313
+  [PASS] 5. Nav2 Architecture (No AMCL/MapServer): amcl=False, map_server=False, nav2_ok=True
+  [PASS] 6. NavigateToPose Action Ready: server_ready=True
+  [PASS] 7. Frontier Explorer Node & Markers: node=True, markers=True
+  [PASS] 8. Autonomous Robot Movement: max_speed=1.060m/s, disp=1.382m
+  [PASS] 9. Trajectory Exploration Reach: max_displacement=1.382m
+  [PASS] 10. Dynamic Map Growth: gain=+15486 cells (+245.3%)
+  [PASS] 11. Collision-Free Navigation: min_clearance=0.772m
+  [PASS] 12. Failed-Goal Blacklisting: active=True, expires=True
+  [PASS] 13. Unreachable Frontier Recovery: graceful empty return
+  [PASS] 14. Safe Completion State Machine: state machine operational
+  [PASS] 15. Map Saving (map_saver_cli): yaml=True, pgm=True
+  [PASS] 16. RViz2 Exploration Snapshot: path=/media/bumble/DATA_DISK/robotics/projects/03_diff_drive_robot/screenshots/phase8_exploration.png
+======================================================================
+```
 ```

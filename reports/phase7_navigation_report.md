@@ -196,3 +196,4 @@ ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose \
 ```bash
 python3 tests/test_phase7_navigation.py
 ```
+

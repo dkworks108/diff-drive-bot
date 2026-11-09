@@ -1,0 +1,21 @@
+frontier_explorer:
+  ros__parameters:
+    use_sim_time: True
+    map_topic: "/map"
+    robot_base_frame: "base_footprint"
+    global_frame: "map"
+    update_interval: 2.0             # seconds between periodic frontier evaluations
+    min_frontier_cluster_size: 5     # minimum cells in a cluster to filter noise
+    min_distance_to_goal: 0.5        # min distance from robot to avoid immediate oscillation
+    max_distance_to_goal: 10.0       # max distance from robot to prioritize local exploration
+    goal_timeout: 45.0               # seconds to allow Nav2 to reach goal
+    blacklist_radius: 0.6            # meters around failed destination to suppress
+    blacklist_duration: 60.0         # seconds to suppress blacklisted location
+    obstacle_safety_distance: 0.28   # clearance in meters from occupied obstacles (chassis radius: 0.22m)
+    weight_distance: 1.0             # travel distance cost weight
+    weight_size: 0.05                # cluster size reward weight
+    weight_clearance: 0.2            # obstacle clearance bonus weight
+    auto_start: True                 # automatically begin exploration
+    max_retries: 5                   # retry attempts when no frontiers are immediately reachable
+    retry_delay: 3.0                 # seconds between retries
+
