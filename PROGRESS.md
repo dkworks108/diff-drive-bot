@@ -23,7 +23,7 @@ This document tracks development milestones, runtime verification evidence, and 
 | 6 | **Phase 4: Odometry & TF2** | **VERIFIED** | `tests/test_phase4_odometry.py` | Validated 50.5 Hz `/odom` rate, full covariance matrices, 1.5mm position error, `odom->base_footprint` dynamic TF, `base_footprint->base_link` static TF, buffer lookup across all links. |
 | 7 | **Phase 5: LiDAR Sensor Integration** | **VERIFIED** | `tests/test_phase5_lidar.py`<br>`launch/gazebo.launch.py` | Integrated `gpu_lidar` on `laser_link` at $x=+0.10\,\text{m}, z=+0.125\,\text{m}$. Verified `/scan` topic, 10.0 Hz rate, 360° FOV, 720 samples, obstacle geometry, and TF `base_link->laser_link`. |
 | 8 | **Phase 6: SLAM 2D Mapping** | **VERIFIED** | `tests/test_phase6_slam.py`<br>`launch/slam.launch.py` | Integrated `slam_toolbox` (online async). Dynamic TF `map -> odom`, full chain to `laser_link`. Robot navigated $1.56\,\text{m}$ in arena, growing known cells by $+231.0\%$. Saved map via `map_saver_cli` to `maps/test_world_map`. |
-| 9 | **Phase 7: Nav2 Autonomous Navigation** | **NOT STARTED** | - | - |
+| 9 | **Phase 7: Nav2 Autonomous Navigation** | **VERIFIED** | `tests/test_phase7_navigation.py`<br>`launch/navigation.launch.py` | Full Nav2 stack (Map Server, AMCL, DWB Controller, Navfn Planner, Behavior Server, BT Navigator, Lifecycle Manager). Verified 11/11 tests: full TF chain, global/local costmaps, 80-waypoint global path, autonomous goal navigation to $(1.8, 0.0)$, active braking ($v=0.035\,\text{m/s} < 0.05\,\text{m/s}$), obstacle clearance ($1.12\,\text{m}$), and RViz screenshot. |
 
 ---
 
@@ -120,5 +120,82 @@ Under simulation-time calibrated testing:
   [PASS] 7. Dynamic Mapping Expansion: dist=1.56m, cell_gain=+14586 (+231.0%)
   [PASS] 8. Map Saving (map_saver_cli): yaml=132B, pgm=42370B
   [PASS] 9. RViz2 Visualization Snapshot: path=screenshots/phase6_slam_mapping.png
+======================================================================
+```
+
+---
+
+## Phase 7 Execution & Evidence Log
+
+### Test Execution (`tests/test_phase7_navigation.py`):
+```
+======================================================================
+  PROJECT 3 - PHASE 7: NAV2 AUTONOMOUS NAVIGATION VALIDATION SUITE
+======================================================================
+
+[TEST 1] Launching Gazebo Fortress + Controllers + Nav2 Stack...
+  Waiting up to 30s for Gazebo, controllers and Nav2 lifecycle activation...
+  Simulation & Nav2 process running: True
+  Simulation time received: True (3.19s)
+
+[TEST 2] Simulation Time Check (/clock)...
+  Current sim_time: 3.189 s
+
+[TEST 3] Map Server Publication (/map)...
+  Map Frame ID: 'map' (Expected: 'map')
+  Resolution: 0.050 m/pixel (Expected: 0.05m)
+  Dimensions: 215 x 197 cells (10.75m x 9.85m)
+  Origin: (-5.83, -4.93)
+
+[TEST 4] AMCL Localization & Dynamic TF (map -> odom)...
+  Transform map -> odom: translation=[-0.0000, 0.0000, 0.0000]
+
+[TEST 5] Full TF Chain: map -> odom -> base_footprint -> base_link -> laser_link...
+  Full Transform map -> laser_link: [0.1000, -0.0000, 0.1750]
+
+[TEST 6] Costmaps Availability (Global & Local)...
+  Global Costmap received: True (Size: 215x197)
+  Local Costmap received:  True (Size: 60x60)
+
+[TEST 7] Global Path Planning via NavfnPlanner...
+  Waiting for compute_path_to_pose action server...
+  ComputePathToPose Action Server Ready: True
+  Path planning goal accepted, computing path...
+  Global Path generated with 80 waypoints.
+
+[TEST 8 & 9] Autonomous Navigation to Goal (X=1.8m, Y=0.0m)...
+  Waiting for navigate_to_pose action server...
+  NavigateToPose Action Server Ready: True
+  Dispatching navigation goal to Nav2 BT Navigator...
+  Navigation goal ACCEPTED. Tracking robot progress...
+  Nav2 action finished with status code: 4 (4 = SUCCEEDED)
+  Final Robot Pose in map: X=1.577 m, Y=0.089 m
+  Target Distance Error: 0.240 m (Tolerance: 0.35m)
+  Final Speed after braking: linear=0.035 m/s (Target: <0.05 m/s), angular=0.005 rad/s
+
+[TEST 10] Obstacle Avoidance Trajectory Planning...
+  Obstacle avoidance path computed with 58 waypoints.
+  Minimum clearance to Northeast Pillar: 1.123 m (Pillar radius: 0.35m)
+
+[TEST 11] RViz2 Navigation Visualization Snapshot...
+  RViz2 screenshot saved: screenshots/phase7_navigation.png (244507 bytes)
+
+  Terminating simulation & Nav2 processes...
+  Cleaned up all background simulation processes.
+
+======================================================================
+  PHASE 7 NAV2 AUTONOMOUS NAVIGATION VALIDATION SUMMARY
+======================================================================
+  [PASS] 1. Stack Launch: sim_time=3.189
+  [PASS] 2. Simulation Time Clock: sim_time=3.189 s
+  [PASS] 3. Map Server (/map): 215x197 cells, res=0.05000000074505806m
+  [PASS] 4. AMCL Dynamic TF (map -> odom): trans=[-0.000, 0.000, 0.000]
+  [PASS] 5. Full TF Chain (map -> laser_link): trans=[0.100, -0.000, 0.175]
+  [PASS] 6. Costmaps Availability: global=True, local=True
+  [PASS] 7. Global Path Planning: waypoints=80
+  [PASS] 8. Autonomous Navigation Execution: goal_accepted=True, status_succeeded=True
+  [PASS] 9. Goal Arrival & Active Braking: dist_err=0.240m, linear_v=0.035m/s
+  [PASS] 10. Obstacle Avoidance Planning: clearance=1.123m
+  [PASS] 11. RViz2 Navigation Snapshot: path=screenshots/phase7_navigation.png
 ======================================================================
 ```

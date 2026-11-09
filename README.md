@@ -1,6 +1,6 @@
 # 03_diff_drive_robot: Autonomous 2-Wheel Differential Drive Mobile Robot
 
-A complete simulated differential-drive mobile robot stack developed for **ROS 2 Humble** and **Gazebo Fortress (Ignition 6.18.0)**, featuring `ros2_control`, precision odometry, 360° 2D LiDAR integration, online asynchronous 2D SLAM (`slam_toolbox`), and readiness for Nav2 autonomous navigation.
+A complete simulated differential-drive mobile robot stack developed for **ROS 2 Humble** and **Gazebo Fortress (Ignition 6.18.0)**, featuring `ros2_control`, precision odometry, 360° 2D LiDAR integration, online asynchronous 2D SLAM (`slam_toolbox`), and full Nav2 autonomous navigation with AMCL localization, global/local costmaps, DWB trajectory controller, Navfn global planner, and behavior tree navigation.
 
 ---
 
@@ -83,7 +83,26 @@ flowchart TD
 
 ---
 
-## 6. Build and Launch Instructions
+---
+
+## 6. Phase 7: Nav2 Autonomous Navigation Architecture
+
+The navigation stack integrates the complete ROS 2 Navigation2 (Nav2) architecture with managed lifecycles:
+
+- **Map Server (`nav2_map_server`)**: Loads and serves the static 2D occupancy grid map (`maps/test_world_map.yaml`) at $0.05\,\text{m/pixel}$.
+- **AMCL Localization (`nav2_amcl`)**: Adaptive Monte Carlo Localization with differential motion model (`nav2_amcl::DifferentialMotionModel`) and likelihood field laser model, publishing the dynamic correction transform `map -> odom`.
+- **Costmap 2D (`nav2_costmap_2d`)**:
+  - **Global Costmap**: Static obstacle map layer + real-time laser obstacle clearing/marking layer + inflation layer ($r_{robot} = 0.22\,\text{m}$, $r_{inflation} = 0.45\,\text{m}$, scaling factor $3.0$).
+  - **Local Costmap**: Dynamic rolling window ($3.0 \times 3.0\,\text{m}$) tracking local sensor obstacles and safety inflation buffers.
+- **Global Path Planner (`nav2_planner`)**: Navfn Dijkstra / wavefront planner (`nav2_navfn_planner/NavfnPlanner`) computing optimal, collision-free global path waypoints in the `map` frame.
+- **Local Controller Server (`nav2_controller`)**: DWB Local Planner (`dwb_core::DWBLocalPlanner`) with trajectory rollout evaluation (`RotateToGoal`, `Oscillation`, `BaseObstacle`, `GoalAlign`, `PathAlign`, `PathDist`, `GoalDist`), velocity limits ($v_{max} = 0.4\,\text{m/s}, \omega_{max} = 1.0\,\text{rad/s}$), and active stopping.
+- **Behavior Server (`nav2_behaviors`)**: Recovery behaviors for obstacle deadlocks (`Spin`, `BackUp`, `Wait`).
+- **BT Navigator (`nav2_bt_navigator`)**: Behavior tree execution engine dispatching navigation goals with automatic replanning and recovery strategies.
+- **Lifecycle Manager (`nav2_lifecycle_manager`)**: Managed state machine transitions for all navigation servers (`map_server`, `amcl`, `controller_server`, `planner_server`, `behavior_server`, `bt_navigator`).
+
+---
+
+## 7. Build and Launch Instructions
 
 ### Setup Environment
 ```bash
@@ -109,21 +128,21 @@ ros2 launch diff_drive_description gazebo.launch.py headless:=false rviz:=true
 ros2 launch diff_drive_description slam.launch.py headless:=false rviz:=true
 ```
 
-### Drive Robot for Mapping
+### Launch Complete Nav2 Autonomous Navigation Stack
 ```bash
-# Teleoperate or publish motion commands
-ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.3}, angular: {z: 0.2}}" -r 10
+# Launches Gazebo Fortress + ros2_control + Map Server + AMCL + Costmaps + Planner + Controller + BT Navigator + RViz2
+ros2 launch diff_drive_description navigation.launch.py headless:=false rviz:=true
 ```
 
-### Save Completed SLAM Map
+### Send Navigation Goal via CLI
 ```bash
-# Save to maps/test_world_map.yaml and maps/test_world_map.pgm
-ros2 run nav2_map_server map_saver_cli -t /map -f maps/test_world_map --ros-args -p use_sim_time:=true
+ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose \
+  "{pose: {header: {frame_id: 'map'}, pose: {position: {x: 1.8, y: 0.0, z: 0.0}, orientation: {w: 1.0}}}}"
 ```
 
 ---
 
-## 7. Verification Test Suite
+## 8. Verification Test Suite
 
 All phases are supported by automated validation suites:
 
@@ -145,11 +164,14 @@ python3 tests/test_phase5_lidar.py
 
 # Phase 6: SLAM Toolbox 2D Mapping & Map Persistence
 python3 tests/test_phase6_slam.py
+
+# Phase 7: Nav2 Autonomous Navigation Full Validation
+python3 tests/test_phase7_navigation.py
 ```
 
 ---
 
-## 8. Milestone Summary
+## 9. Milestone Summary
 
 | Milestone | Status | Key Evidence |
 | :--- | :---: | :--- |
@@ -159,4 +181,4 @@ python3 tests/test_phase6_slam.py
 | **Phase 4: Odometry & TF2** | **VERIFIED** | $1.5\,\text{mm}$ position error, dynamic TF `odom -> base_footprint`, static TF `base_footprint -> base_link`. |
 | **Phase 5: 2D LiDAR** | **VERIFIED** | $360^\circ$ FOV, 720 samples, 10Hz, accurate detection of arena geometry. |
 | **Phase 6: SLAM 2D Mapping** | **VERIFIED** | Ceres-backed async mapping, dynamic `map -> odom` TF, $+231.0\%$ map growth during motion, saved to `maps/test_world_map`. |
-| **Phase 7: Nav2 Navigation** | **NOT STARTED** | Ready for Phase 7 navigation stack integration. |
+| **Phase 7: Nav2 Navigation** | **VERIFIED** | Map Server + AMCL + Costmaps + Navfn + DWB + BT Navigator. 11/11 tests pass: dynamic TF, path planning (80 waypoints), autonomous navigation to $(1.8, 0.0)$, active braking ($v=0.035\,\text{m/s} < 0.05\,\text{m/s}$), obstacle clearance ($1.12\,\text{m}$). |
